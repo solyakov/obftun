@@ -50,6 +50,11 @@ ip route add default via "$tun_remote_ip" dev "$tun_iface" table "$tunnel_table"
 
 ip route flush cache
 
+echo "Setting up NAT"
+
+iptables -t nat -D POSTROUTING -o "$tun_iface" -j MASQUERADE 2>/dev/null || true
+iptables -t nat -A POSTROUTING -o "$tun_iface" -j MASQUERADE
+
 echo "Setting up forwarding rules"
 
 iptables -D FORWARD -i "$wifi_iface" -o "$tun_iface" -j ACCEPT 2>/dev/null || true
