@@ -13,10 +13,11 @@ A secure point-to-point TUN tunnel over TLS with mutual authentication.
         │  ┌──────────────┐   │                                │   ┌──────────────┐  │
         │  │   tun0       │   │         TLS Connection         │   │   tun0       │  │
   LAN ◄─┼─►│ 10.10.0.2/24 │◄──┼────────────────────────────────┼──►│ 10.10.0.1/24 │◄─┼─► Internet
-        │  └──────────────┘   │     (mutual auth via certs)    │   └──────────────┘  │
+        │  └──────────────┘   │     (mutual auth via certs)    │   └──────────────┘  │ (uncensored)
         │                     │                                │                     │
         └─────────────────────┘                                └─────────────────────┘
             OpenWrt Router                 Internet                      EC2
+                                          (censored)
 ```
 
 ## How It Works
@@ -44,35 +45,18 @@ make arm64-build        # For OpenWrt/ARM64
 
 ### 3. Run Server
 
-```bash
-./obftun \
-  --bind :8443 \
-  --certificate data/server.crt \
-  --key data/server.key \
-  --ca data/ca.crt \
-  --script scripts/ifconfig-server.sh
-```
+See [server.sh](scripts/server.sh)
 
 ### 4. Run Client
 
-```bash
-./obftun \
-  --dial <server-ip>:8443 \
-  --certificate data/client.crt \
-  --key data/client.key \
-  --ca data/ca.crt \
-  --script scripts/ifconfig-client.sh
-```
+See [client.sh](scripts/client.sh)
 
 ## Installation
 
 ### Server (systemd)
 
 ```bash
-make keys
-make build
 make install-server
-systemctl status obftun-server
 ```
 
 ## Configuration
