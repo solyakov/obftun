@@ -4,10 +4,10 @@
 set -e
 
 declare -r tun_iface="$1"
-declare -r tun_local_ip="10.10.0.1"
+declare -r tun_local_ip="10.10.0.1" # EC2 tunnel endpoint
 declare -i tun_mask=24
 declare -i tun_mtu=1420
-declare -r external_iface="ens5" # Outgoing interface on the server
+declare -r external_iface="ens5" # EC2 internet-facing interface (adjust to your setup)
 
 if [ -z "$tun_iface" ]; then
     echo "Usage: $0 <tun_iface>"
