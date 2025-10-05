@@ -23,7 +23,7 @@ A secure point-to-point TUN tunnel over TLS with mutual authentication.
 ## How It Works
 
 1. Both sides create TUN interfaces
-2. Setup script configures IP addresses and routing
+2. Setup script configures IP addresses and routing (see [ifconfig-client.sh](scripts/ifconfig-client.sh) and [ifconfig-server.sh](scripts/ifconfig-server.sh))
 3. TLS connection with mutual certificate authentication
 4. IP packets are length-framed and encrypted over TCP
 5. Traffic flows bidirectionally through the secure tunnel
