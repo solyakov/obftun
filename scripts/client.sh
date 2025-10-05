@@ -10,5 +10,5 @@ while sleep 1s; do
         --certificate "../data/client.crt" \
         --key "../data/client.key" \
         --ca "../data/ca.crt" \
-        --verbose
+        --verbose # Remove "verbose" on PROD
 done
