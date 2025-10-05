@@ -4,11 +4,11 @@
 set -e
 
 declare -r tun_iface="$1"
-declare -r tun_local_ip="10.10.0.2"
-declare -r tun_remote_ip="10.10.0.1"
+declare -r tun_local_ip="10.10.0.2"  # OpenWrt tunnel endpoint
+declare -r tun_remote_ip="10.10.0.1" # EC2 tunnel endpoint
 declare -i tun_mask=24
 declare -i tun_mtu=1420
-declare -r wifi_iface="br-proxy"
+declare -r wifi_iface="br-proxy" # OpenWrt LAN interface (adjust to your setup)
 declare -ri fwmark=100
 declare -ri tunnel_table=100
 
