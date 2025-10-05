@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 APP_NAME := obftun
 DATA_DIR := data
-SERVER_SAN := IP:<server-ip>
+SERVER_SAN := IP:<server-ip> # EC2 IP address (adjust to your setup)
 INSTALL_DIR := /opt/$(APP_NAME)
 SERVICE_NAME := $(APP_NAME)-server.service
 SCRIPTS_DIR := scripts
