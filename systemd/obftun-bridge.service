@@ -1,0 +1,86 @@
+[Unit]
+Description=obftun bridge
+Documentation=man:dnsmasq(8) man:iptables(8)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+
+Environment="BRIDGE=br-obftun"
+Environment="BRIDGE_IP=10.10.0.1"
+Environment="BRIDGE_MASK=24"
+Environment="BRIDGE_MTU=1420"
+
+# Adjust to your internet-facing interface
+Environment="EXTERNAL_IFACE=ens5"
+
+Environment="DHCP_RANGE_START=10.10.0.10"
+Environment="DHCP_RANGE_END=10.10.0.254"
+Environment="DHCP_LEASE_TIME=12h"
+
+# Adjust to your DNS servers
+Environment="DNS_SERVER_1=8.8.8.8"
+Environment="DNS_SERVER_2=8.8.4.4"
+
+ExecStartPre=/bin/bash -c '\
+    ip link add name ${BRIDGE} type bridge 2>/dev/null || true; \
+    ip link set ${BRIDGE} mtu ${BRIDGE_MTU}; \
+    ip addr add ${BRIDGE_IP}/${BRIDGE_MASK} dev ${BRIDGE} 2>/dev/null || true; \
+    ip link set ${BRIDGE} up'
+
+ExecStartPre=/bin/bash -c 'echo 1 > /proc/sys/net/ipv4/ip_forward'
+
+ExecStartPre=/bin/bash -c '\
+    iptables -t nat -C POSTROUTING -s ${BRIDGE_IP}/${BRIDGE_MASK} -o ${EXTERNAL_IFACE} -j MASQUERADE 2>/dev/null || \
+        iptables -t nat -A POSTROUTING -s ${BRIDGE_IP}/${BRIDGE_MASK} -o ${EXTERNAL_IFACE} -j MASQUERADE; \
+    iptables -C FORWARD -i ${BRIDGE} -o ${EXTERNAL_IFACE} -j ACCEPT 2>/dev/null || \
+        iptables -A FORWARD -i ${BRIDGE} -o ${EXTERNAL_IFACE} -j ACCEPT; \
+    iptables -C FORWARD -i ${EXTERNAL_IFACE} -o ${BRIDGE} -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+        iptables -A FORWARD -i ${EXTERNAL_IFACE} -o ${BRIDGE} -m state --state RELATED,ESTABLISHED -j ACCEPT; \
+    iptables -C FORWARD -i ${BRIDGE} -o ${BRIDGE} -j ACCEPT 2>/dev/null || \
+        iptables -A FORWARD -i ${BRIDGE} -o ${BRIDGE} -j ACCEPT'
+
+ExecStartPre=/bin/bash -c 'mkdir -p /var/lib/misc'
+
+ExecStart=/bin/bash -c 'exec /usr/sbin/dnsmasq \
+    --interface=${BRIDGE} \
+    --bind-interfaces \
+    --listen-address=${BRIDGE_IP} \
+    --port=0 \
+    --dhcp-range=${DHCP_RANGE_START},${DHCP_RANGE_END},${DHCP_LEASE_TIME} \
+    --dhcp-option=option:router,${BRIDGE_IP} \
+    --dhcp-option=option:dns-server,${DNS_SERVER_1},${DNS_SERVER_2} \
+    --dhcp-leasefile=/var/lib/misc/dnsmasq-${BRIDGE}.leases \
+    --pid-file=/var/run/dnsmasq-${BRIDGE}.pid \
+    --no-daemon \
+    --log-dhcp \
+    --log-facility=-'
+
+ExecStopPost=/bin/bash -c '\
+    iptables -t nat -D POSTROUTING -s ${BRIDGE_IP}/${BRIDGE_MASK} -o ${EXTERNAL_IFACE} -j MASQUERADE 2>/dev/null || true; \
+    iptables -D FORWARD -i ${BRIDGE} -o ${EXTERNAL_IFACE} -j ACCEPT 2>/dev/null || true; \
+    iptables -D FORWARD -i ${EXTERNAL_IFACE} -o ${BRIDGE} -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true; \
+    iptables -D FORWARD -i ${BRIDGE} -o ${BRIDGE} -j ACCEPT 2>/dev/null || true'
+
+ExecStopPost=/bin/bash -c 'echo 0 > /proc/sys/net/ipv4/ip_forward'
+
+ExecStopPost=/bin/bash -c 'ip link delete ${BRIDGE} 2>/dev/null || true'
+
+Restart=always
+RestartSec=5
+StartLimitInterval=300
+StartLimitBurst=10
+
+NoNewPrivileges=true
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/misc /var/run
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_NET_ADMIN
+
+MemoryMax=100M
+TasksMax=10
+
+[Install]
+WantedBy=multi-user.target

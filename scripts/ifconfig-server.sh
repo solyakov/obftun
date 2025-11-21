@@ -1,40 +1,78 @@
 #!/bin/bash
-# Usage: ifconfig-server.sh <interface_name>
+#
+# Usage: ifconfig-server.sh <interface_name> <up|down> [peer_addr]
+#
+# Network Architecture:
+# ┌─────────────────────────────────────────────────┐
+# │                   Server Host                   │
+# │                                                 │
+# │  ┌────────────────┐                             │
+# │  │ DHCP Server    │                             │
+# │  │ 10.10.0.10-254 │                             │
+# │  └───┬────────────┘                             │
+# │      |                                          │
+# │  ┌───┴──────────────────────────────────────┐   │
+# │  │            Bridge (10.10.0.1)            │   │
+# │  │           (L2 Ethernet switch)           │   │
+# │  └───┬──────┬──────┬──────┬─────────────────┘   │
+# │      │      │      │      │                     │
+# │    tap0   tap1   tap2   tap3  ...               │
+# │      │      │      │      │                     │
+# │  Client1 Client2 Client3 Client4                │
+# │      │      │      |      |                     │
+# │      │     ...    ...    ...                    │
+# └──────┼──────────────────────────────────────────┘
+#        |
+# ┌──────┼──────────────────────────────────────────┐
+# │      |            Client Host                   │
+# │    tap0                                         │
+# │                                                 │
+# └─────────────────────────────────────────────────┘
 
 set -e
 
-declare -r tun_iface="$1"
-declare -r tun_local_ip="10.10.0.1" # EC2 tunnel endpoint
-declare -i tun_mask=24
-declare -i tun_mtu=1420
-declare -r external_iface="ens5" # EC2 internet-facing interface (adjust to your setup)
+declare -r tap_iface="$1"
+declare -r action="$2"
+declare -r peer_addr="$3"
 
-if [ -z "$tun_iface" ]; then
-    echo "Usage: $0 <tun_iface>"
+if [ -z "$tap_iface" ] || [ -z "$action" ]; then
+    echo "Usage: $0 <tap_iface> <up|down> [peer_addr]"
     exit 1
 fi
 
-echo "Configuring interface $tun_iface"
+declare -r bridge_name="br-obftun"
 
-ip addr add "$tun_local_ip/$tun_mask" dev "$tun_iface"
-ip link set "$tun_iface" mtu "$tun_mtu"
-ip link set "$tun_iface" up
+action_up() {
+    echo "Attaching interface ${tap_iface} to bridge ${bridge_name}"
+    
+    if [ -n "$peer_addr" ]; then
+        ip link set "$tap_iface" alias "$peer_addr" 2>/dev/null || true
+    fi
+    
+    ip link set "$tap_iface" up
+    ip link set "$tap_iface" master "$bridge_name"
+    
+    echo "Interface ${tap_iface} attached to bridge ${bridge_name}"
+}
 
-echo "Enabling IP forwarding"
+action_down() {
+    echo "Detaching interface ${tap_iface} from bridge ${bridge_name}"
+    
+    ip link set "$tap_iface" nomaster 2>/dev/null || true
+    ip link set "$tap_iface" down 2>/dev/null || true
+    
+    echo "Interface ${tap_iface} detached from bridge ${bridge_name}"
+}
 
-echo 1 > /proc/sys/net/ipv4/ip_forward
-
-echo "Setting up NAT"
-
-iptables -t nat -D POSTROUTING -s "$tun_local_ip/$tun_mask" -o "$external_iface" -j MASQUERADE 2>/dev/null || true
-iptables -t nat -A POSTROUTING -s "$tun_local_ip/$tun_mask" -o "$external_iface" -j MASQUERADE
-
-echo "Setting up forwarding"
-
-iptables -D FORWARD -i "$tun_iface" -o "$external_iface" -j ACCEPT 2>/dev/null || true
-iptables -A FORWARD -i "$tun_iface" -o "$external_iface" -j ACCEPT
-
-iptables -D FORWARD -i "$external_iface" -o "$tun_iface" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
-iptables -A FORWARD -i "$external_iface" -o "$tun_iface" -m state --state RELATED,ESTABLISHED -j ACCEPT
-
-echo "Interface $tun_iface configured"
+case "$action" in
+    "up")
+        action_up
+        ;;
+    "down")
+        action_down
+        ;;
+    *)
+        echo "Unknown action: $action"
+        exit 1
+        ;;
+esac

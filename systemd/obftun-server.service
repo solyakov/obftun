@@ -1,7 +1,8 @@
 [Unit]
-Description=TLS Tunnel Server
-After=network-online.target
+Description=obftun server
+After=network-online.target obftun-bridge.service
 Wants=network-online.target
+Requires=obftun-bridge.service
 
 [Service]
 Type=simple
@@ -15,7 +16,6 @@ Environment="OBFTUN_CERTIFICATE=/opt/obftun/server.crt"
 Environment="OBFTUN_KEY=/opt/obftun/server.key"
 Environment="OBFTUN_CA=/opt/obftun/ca.crt"
 Environment="OBFTUN_SCRIPT=/opt/obftun/ifconfig-server.sh"
-Environment="OBFTUN_IFACE=obftun0"
 
 ExecStart=/opt/obftun/obftun
 
