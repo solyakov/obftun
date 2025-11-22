@@ -39,7 +39,7 @@ func main() {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		s := <-sig
-		log.Printf("Received signal %v, shutting down", s)
+		log.Printf("Received signal %v", s)
 		cancel()
 	}()
 
@@ -109,6 +109,7 @@ func runServer(ctx context.Context, cfg *config.Config, tlsConfig *tls.Config) e
 		return fmt.Errorf("failed to listen on %s: %w", cfg.Bind, err)
 	}
 	defer listener.Close()
+
 	log.Printf("Listening on %s", cfg.Bind)
 
 	go func() {
@@ -132,7 +133,7 @@ func runServer(ctx context.Context, cfg *config.Config, tlsConfig *tls.Config) e
 		}
 		go func(c net.Conn) {
 			defer c.Close()
-			if err := handleServerConn(ctx, cfg, c); err != nil {
+			if err := handleServerConn(ctx, cfg, c); err != nil && !errors.Is(err, context.Canceled) {
 				log.Printf("Server connection ended: %v", err)
 			}
 		}(conn)

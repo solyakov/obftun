@@ -41,7 +41,7 @@ func New(cfg *config.Config, peerAddr string) (*Interface, error) {
 
 	if err := script.Run(cfg, iface.Name(), actionUp, peerAddr); err != nil {
 		iface.Close()
-		return nil, fmt.Errorf("failed to run up script: %w", err)
+		return nil, fmt.Errorf("failed to run script: %w", err)
 	}
 
 	return tun, nil

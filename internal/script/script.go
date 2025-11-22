@@ -25,7 +25,7 @@ func Run(cfg *config.Config, ifaceName, action, peerAddr string) error {
 		log.Println(string(output))
 	}
 	if err != nil {
-		return fmt.Errorf("failed to execute script %s with action %s and peer addr %s: %w", cfg.Script, action, peerAddr, err)
+		return fmt.Errorf("failed to execute script %s with action %s and peer %s: %w", cfg.Script, action, peerAddr, err)
 	}
 	return nil
 }
