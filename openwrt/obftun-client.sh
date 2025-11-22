@@ -11,20 +11,17 @@ cd "$(dirname "$0")"
 declare -r bridge="br-client"
 declare -r wifi_iface="phy1-ap0"
 
-function setup_bridge_if_not_exists() {
-    if ip link show "$bridge" > /dev/null 2>&1; then
-        echo "Bridge $bridge already exists, skipping setup"
-        return
-    fi
-    
-    ip link add name "$bridge" type bridge
-    ip link set "$bridge" mtu 1420
+function setup_bridge() {
+    echo "Setting up bridge $bridge"
+
+    ip link add name "$bridge" type bridge 2>/dev/null || true
+    ip link set "$bridge" mtu 1500
     ip link set "$bridge" up
-    
-    ip link set "$wifi_iface" master "$bridge"
+
+    ip link set "$wifi_iface" master "$bridge" 2>/dev/null || true
     ip link set "$wifi_iface" up
-    
-    echo "Bridge $bridge configured with $wifi_iface"
+
+    echo "Bridge $bridge configured"
 }
 
 declare -r dial="<server-ip>:8443"
@@ -46,5 +43,5 @@ function run_client_forever() {
     done
 }
 
-setup_bridge_if_not_exists
+setup_bridge
 run_client_forever

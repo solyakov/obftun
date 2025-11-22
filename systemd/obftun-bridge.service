@@ -10,7 +10,7 @@ Type=simple
 Environment="BRIDGE=br-obftun"
 Environment="BRIDGE_IP=10.10.0.1"
 Environment="BRIDGE_MASK=24"
-Environment="BRIDGE_MTU=1420"
+Environment="BRIDGE_MTU=1500"
 
 # Adjust to your internet-facing interface
 Environment="EXTERNAL_IFACE=ens5"
