@@ -3,30 +3,32 @@
 # Usage: ifconfig-client.sh <interface_name> <up|down> [peer_addr]
 #
 # Network Architecture (OpenWrt Client):
-# ┌─────────────────────────────────────────────────┐
-# │                OpenWrt Router                   │
-# │                                                 │
-# │  ┌──────────────────────────────────────────┐   │
-# │  │           Bridge (br-client)             │   │
-# │  │         (no IP, pure L2 switch)          │   │
-# │  │         pre-configured by admin          │   │
-# │  └───┬──────────────────────────────────┬───┘   │
-# │      │                                  │       │
-# │  ┌───┴────┐                        ┌────┴────┐  │
-# │  │  WIFI  │                        │   TAP   │  │
-# │  │phy1-ap0│                        │  (tap0) │  │
-# │  │(static)│                        │(dynamic)│  │
-# │  └───┬────┘                        └────┬────┘  │
-# │      │                                  │       │
-# └──────┼──────────────────────────────────┼───────┘
-#        │                                  |
-#   WiFi Clients                     Tunnel to Server
+#
+#     Tunnel to Server
+#            |
+# ┌──────────┼──────────────────────────────────────┐
+# │          │       OpenWrt Router                 │
+# │          │                                      │
+# │  ┌───────┴───────┐                              │
+# │  │ obftun-client │                              │
+# │  └───────┬───────┘                              │
+# │          │                                      │
+# |         tap0                                    │
+# |          │                                      │
+# |  ┌───────┴────────┐                             │
+# |  │ Bridge (no IP) |                             │
+# |  └───────┬────────┘                             │
+# |          │                                      │
+# |      phy1-ap0                                   │
+# └──────────┼──────────────────────────────────────┘
+#            |
+#      5G WiFi Clients
 
 set -e
 
-declare -r tap_iface="$1"
-declare -r action="$2"
-declare -r peer_addr="$3"
+declare -r tap_iface="$1" # tap0
+declare -r action="$2"    # up|down
+declare -r peer_addr="$3" # 1.2.3.4:5678
 
 if [ -z "$tap_iface" ] || [ -z "$action" ]; then
     echo "Usage: $0 <tap_iface> <up|down> [peer_addr]"
@@ -39,6 +41,8 @@ action_up() {
     echo "Attaching interface ${tap_iface} to bridge ${bridge_name}"
     
     if [ -n "$peer_addr" ]; then
+        # Set the server address as an alias to the interface.
+        # Makes little sense for the client, but it is here for completeness.
         ip link set "$tap_iface" alias "$peer_addr" 2>/dev/null || true
     fi
     

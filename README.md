@@ -6,7 +6,7 @@ A secure tunnel over TLS with mutual authentication, supporting multiple concurr
 
 `obftun` creates encrypted Layer 2 tunnels between clients and server using TLS. Each client connection gets its own dedicated TAP interface on the server. Both client and server authenticate each other using certificates (mTLS).
 
-### Server Architecture
+### Architecture
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -18,39 +18,37 @@ A secure tunnel over TLS with mutual authentication, supporting multiple concurr
 │  └───┬────────────┘                             │
 │      |                                          │
 │  ┌───┴──────────────────────────────────────┐   │
-│  │            Bridge (10.10.0.1)            │   │
-│  │           (L2 Ethernet switch)           │   │
-│  └───┬──────┬──────┬──────┬─────────────────┘   │
-│      │      │      │      │                     │
-│    tap0   tap1   tap2   tap3  ...               │
-│      │      │      │      │                     │
-└──────┼──────┼──────┼──────┼─────────────────────┘
-       │      │      │      │
-     (TLS)  (TLS)  (TLS)  (TLS)
-       │      │      │      │
-       Clients over Internet
-```
-
-### Client Architecture (OpenWrt)
-
-```
-┌─────────────────────────────────────────────────┐
-│                OpenWrt Router                   │
-│                                                 │
-│  ┌──────────────────────────────────────────┐   │
-│  │           Bridge (br-client)             │   │
-│  │         (no IP, pure L2 switch)          │   │
-│  └───┬──────────────────────────────────┬───┘   │
-│      │                                  │       │
-│  ┌───┴────┐                        ┌────┴────┐  │
-│  │  WiFi  │                        │   TAP   │  │
-│  │phy1-ap0│                        │  (tap0) │  │
-│  │(static)│                        │(dynamic)│  │
-│  └───┬────┘                        └────┬────┘  │
-│      │                                  │       │
-└──────┼──────────────────────────────────┼───────┘
-       │                                  |
-  WiFi Clients                       TLS to Server
+│  │            Bridge (10.10.0.1)   ┌────────┼───┼──── Internet (Country 2)
+│  └─────────────────────────────────┼────────┘   │
+│                                    │            │
+│                                   tap0          │
+│                                    │            │
+│                            ┌───────┴───────┐    │
+│                            │ obftun-server │    │
+│                            └───────┬───────┘    │
+│                                    │            │
+└────────────────────────────────────┼────────────┘
+                                     │
+                      (mTLS)         │
+           ┌─────────────────────────┘
+           │
+┌──────────┼──────────────────────────────────────┐
+│          │       OpenWrt Router                 │
+│          │                                      │
+│  ┌───────┴───────┐                              │
+│  │ obftun-client │                              │
+│  └───────┬───────┘                              │
+│          │                                      │
+|         tap0                                    │
+|          │                        ┌─────────────┼──── Internet (Country 1)
+|  ┌───────┴────────┐               |             │
+|  │ Bridge (no IP) |               |             │
+|  └───────┬────────┘               |             │
+|          │                        │             │
+|      phy1-ap0                 phy0-ap0          │
+└──────────┼────────────────────────┼─────────────┘
+           |                        |
+     5G WiFi Clients        2.4G WiFi Clients
 ```
 
 ## Quick Start
@@ -84,8 +82,7 @@ make arm64-build        # For OpenWrt/ARM64 routers
 Install on your server (EC2, VPS, etc.):
 
 ```bash
-GOOS=linux go build -o data/obftun ./cmd/obftun
-make install-server
+make build install-server
 ```
 
 This installs:
@@ -129,7 +126,7 @@ Command line flags:
 ```
   -b, --bind            Server bind address (default: :8443 for server)
   -d, --dial            Server address to connect to (client only)
-  -i, --iface           TAP interface name pattern (default: tap%d)
+  -i, --iface           Interface name pattern (default: tap%d)
   -s, --script          Setup script for interface configuration
   -t, --script-timeout  Script execution timeout in seconds (default: 15)
   -r, --read-timeout    Connection read timeout in seconds (default: 60)

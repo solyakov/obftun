@@ -18,22 +18,20 @@
 # │      │      │      │      │                     │
 # │    tap0   tap1   tap2   tap3  ...               │
 # │      │      │      │      │                     │
-# │  Client1 Client2 Client3 Client4                │
-# │      │      │      |      |                     │
-# │      │     ...    ...    ...                    │
-# └──────┼──────────────────────────────────────────┘
-#        |
-# ┌──────┼──────────────────────────────────────────┐
-# │      |            Client Host                   │
-# │    tap0                                         │
-# │                                                 │
-# └─────────────────────────────────────────────────┘
+# │  ┌───┴──────┴──────┴──────┴─────────────────┐   │
+# │  │               obftun-server              │   │
+# │  └───┬──────┬──────┬──────┬─────────────────┘   │
+# │      │      │      │      │                     │
+# └──────┼──────┼──────┼──────┼─────────────────────┘
+#        |      |      |      |
+#     Client0   Other clients ...
+
 
 set -e
 
-declare -r tap_iface="$1"
-declare -r action="$2"
-declare -r peer_addr="$3"
+declare -r tap_iface="$1" # tap0
+declare -r action="$2"    # up|down
+declare -r peer_addr="$3" # 1.2.3.4:5678
 
 if [ -z "$tap_iface" ] || [ -z "$action" ]; then
     echo "Usage: $0 <tap_iface> <up|down> [peer_addr]"
@@ -46,9 +44,12 @@ action_up() {
     echo "Attaching interface ${tap_iface} to bridge ${bridge_name}"
     
     if [ -n "$peer_addr" ]; then
+        # Set the client address as an alias to the interface.
+        # This makes it easier to identify the client using
+        # "ip link show" and similar commands to see RX/TX stats.
         ip link set "$tap_iface" alias "$peer_addr" 2>/dev/null || true
     fi
-    
+
     ip link set "$tap_iface" up
     ip link set "$tap_iface" master "$bridge_name"
     
