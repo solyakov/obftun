@@ -43,7 +43,7 @@ func main() {
 		cancel()
 	}()
 
-	if err := run(ctx, cfg); err != nil && !errors.Is(err, context.Canceled) {
+	if err := run(ctx, cfg); !errors.Is(err, context.Canceled) {
 		log.Fatalf("Error: %v", err)
 	}
 	log.Printf("Bye!")
@@ -74,8 +74,8 @@ func runClient(ctx context.Context, cfg *config.Config, tlsConfig *tls.Config) e
 	}
 
 	for {
-		if err := runClientSession(ctx, cfg, dialer, tlsConfig); err != nil && !errors.Is(err, context.Canceled) {
-			log.Printf("Client session ended: %v", err)
+		if err := runClientSession(ctx, cfg, dialer, tlsConfig); !errors.Is(err, context.Canceled) {
+			log.Printf("Session error: %v", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -86,19 +86,40 @@ func runClient(ctx context.Context, cfg *config.Config, tlsConfig *tls.Config) e
 }
 
 func runClientSession(ctx context.Context, cfg *config.Config, dialer *net.Dialer, tlsConfig *tls.Config) error {
+	tun, err := tunnel.New(cfg, cfg.Dial)
+	if err != nil {
+		return fmt.Errorf("failed to create tunnel: %w", err)
+	}
+	defer tun.Close()
+
+	log.Printf("Created interface %s", tun.Name())
+
+	for {
+		err := handleClientConn(ctx, cfg, dialer, tlsConfig, tun)
+		if errors.Is(err, context.Canceled) || transport.IsInterfaceError(err) {
+			return err
+		}
+
+		log.Printf("Lost connection to %s: %v", cfg.Dial, err)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(retryInterval):
+		}
+	}
+}
+
+func handleClientConn(ctx context.Context, cfg *config.Config, dialer *net.Dialer, tlsConfig *tls.Config, tun *tunnel.Interface) error {
+	log.Printf("Connecting to %s", cfg.Dial)
+
 	conn, err := tls.DialWithDialer(dialer, "tcp", cfg.Dial, tlsConfig)
 	if err != nil {
 		return fmt.Errorf("failed to connect to %s: %w", cfg.Dial, err)
 	}
 	defer conn.Close()
-	
-	log.Printf("Connected to %s", cfg.Dial)
 
-	tun, err := tunnel.New(cfg, conn.RemoteAddr().String())
-	if err != nil {
-		return fmt.Errorf("failed to create tunnel: %w", err)
-	}
-	defer tun.Close()
+	log.Printf("Connected to %s", cfg.Dial)
 
 	return transport.Pipe(ctx, cfg, conn, tun)
 }
@@ -120,9 +141,6 @@ func runServer(ctx context.Context, cfg *config.Config, tlsConfig *tls.Config) e
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				return nil
-			}
 			log.Printf("Failed to accept connection: %v", err)
 			select {
 			case <-ctx.Done():
@@ -133,27 +151,29 @@ func runServer(ctx context.Context, cfg *config.Config, tlsConfig *tls.Config) e
 		}
 		go func(c net.Conn) {
 			defer c.Close()
-			if err := handleServerConn(ctx, cfg, c); err != nil && !errors.Is(err, context.Canceled) {
-				log.Printf("Server connection ended: %v", err)
+			log.Printf("%s connected", c.RemoteAddr())
+			if err := handleServerConn(ctx, cfg, c); !errors.Is(err, context.Canceled) {
+				log.Printf("%s connection error: %v", c.RemoteAddr(), err)
 			}
+			log.Printf("%s disconnected", c.RemoteAddr())
 		}(conn)
 	}
 }
 
 func handleServerConn(ctx context.Context, cfg *config.Config, conn net.Conn) error {
-	log.Printf("Client connected from %s", conn.RemoteAddr())
-
 	if tlsConn, ok := conn.(*tls.Conn); ok {
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
-			return fmt.Errorf("TLS handshake failed from %s: %w", conn.RemoteAddr(), err)
+			return fmt.Errorf("%s failed TLS handshake: %w", conn.RemoteAddr(), err)
 		}
 	}
 
 	tun, err := tunnel.New(cfg, conn.RemoteAddr().String())
 	if err != nil {
-		return fmt.Errorf("failed to create tunnel: %w", err)
+		return fmt.Errorf("failed to create tunnel for %s: %w", conn.RemoteAddr(), err)
 	}
 	defer tun.Close()
+
+	log.Printf("Created interface %s for %s", tun.Name(), conn.RemoteAddr())
 
 	return transport.Pipe(ctx, cfg, conn, tun)
 }

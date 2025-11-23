@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -15,6 +16,23 @@ import (
 )
 
 const bufferSize = 65535
+
+type InterfaceError struct {
+	Err error
+}
+
+func (e *InterfaceError) Error() string {
+	return fmt.Sprintf("interface error: %v", e.Err)
+}
+
+func (e *InterfaceError) Unwrap() error {
+	return e.Err
+}
+
+func IsInterfaceError(err error) bool {
+	var ie *InterfaceError
+	return errors.As(err, &ie)
+}
 
 func Pipe(ctx context.Context, cfg *config.Config, conn net.Conn, tun *tunnel.Interface) error {
 	errc := make(chan error, 2)
@@ -50,7 +68,7 @@ func connToTun(cfg *config.Config, conn net.Conn, tun *tunnel.Interface) error {
 			return fmt.Errorf("failed to read packet from %s: %w", conn.RemoteAddr(), err)
 		}
 		if _, err := tun.Write(buf[:n]); err != nil {
-			return fmt.Errorf("failed to write packet to %s: %w", tun.Name(), err)
+			return &InterfaceError{Err: fmt.Errorf("failed to write packet to %s: %w", tun.Name(), err)}
 		}
 		if cfg.Verbose {
 			log.Printf("%s [%d]-> %s", conn.RemoteAddr(), n, tun.Name())
@@ -64,7 +82,7 @@ func tunToConn(cfg *config.Config, tun *tunnel.Interface, conn net.Conn) error {
 	for {
 		n, err := tun.Read(buf)
 		if err != nil {
-			return fmt.Errorf("failed to read packet from %s: %w", tun.Name(), err)
+			return &InterfaceError{Err: fmt.Errorf("failed to read packet from %s: %w", tun.Name(), err)}
 		}
 		if err := binary.Write(bw, binary.BigEndian, uint32(n)); err != nil {
 			return fmt.Errorf("failed to write packet size to %s: %w", conn.RemoteAddr(), err)
