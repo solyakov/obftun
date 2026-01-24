@@ -16,6 +16,7 @@ Environment="OBFTUN_CERTIFICATE=/opt/obftun/server.crt"
 Environment="OBFTUN_KEY=/opt/obftun/server.key"
 Environment="OBFTUN_CA=/opt/obftun/ca.crt"
 Environment="OBFTUN_SCRIPT=/opt/obftun/ifconfig-server.sh"
+Environment="OBFTUN_FAKE=example.com"
 
 ExecStart=/opt/obftun/obftun
 

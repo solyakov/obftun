@@ -30,6 +30,7 @@ declare -r script="./ifconfig-client.sh"
 declare -r certificate="./client.crt"
 declare -r key="./client.key"
 declare -r ca="./ca.crt"
+declare -r fake="example.com"
 
 function run_client_forever() {
     while true; do
@@ -39,7 +40,8 @@ function run_client_forever() {
             --script "$script" \
             --certificate "$certificate" \
             --key "$key" \
-            --ca "$ca"
+            --ca "$ca" \
+            --fake "$fake"
     done
 }
 

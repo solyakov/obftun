@@ -133,6 +133,7 @@ Command line flags:
   -c, --certificate     Certificate file (default: cert.crt)
   -k, --key             Private key file (default: key.pem)
   -a, --ca              CA certificate file (default: ca.crt)
+  -f, --fake            Domain to fake. Server proxies requests to this domain for unauthenticated clients. Client uses this domain for SNI. (default: example.com)
   -v, --verbose         Verbose logging
 ```
 
@@ -146,5 +147,6 @@ All flags can be set via environment variables:
 - `OBFTUN_CERTIFICATE`
 - `OBFTUN_KEY`
 - `OBFTUN_CA`
+- `OBFTUN_FAKE`
 - `OBFTUN_VERBOSE`
 

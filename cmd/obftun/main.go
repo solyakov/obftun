@@ -55,11 +55,11 @@ func run(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 
-	if cfg.Dial != "" {
-		return runClient(ctx, cfg, tlsConfig)
+	if cfg.IsServer() {
+		return runServer(ctx, cfg, tlsConfig)
 	}
 
-	return runServer(ctx, cfg, tlsConfig)
+	return runClient(ctx, cfg, tlsConfig)
 }
 
 func runClient(ctx context.Context, cfg *config.Config, tlsConfig *tls.Config) error {
@@ -161,10 +161,18 @@ func runServer(ctx context.Context, cfg *config.Config, tlsConfig *tls.Config) e
 }
 
 func handleServerConn(ctx context.Context, cfg *config.Config, conn net.Conn) error {
-	if tlsConn, ok := conn.(*tls.Conn); ok {
-		if err := tlsConn.HandshakeContext(ctx); err != nil {
-			return fmt.Errorf("client %s failed TLS handshake: %w", conn.RemoteAddr(), err)
-		}
+	tlsConn, ok := conn.(*tls.Conn)
+	if !ok {
+		return fmt.Errorf("expected TLS connection from %s", conn.RemoteAddr())
+	}
+
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		return fmt.Errorf("client %s failed TLS handshake: %w", conn.RemoteAddr(), err)
+	}
+
+	if !transport.IsAuthenticated(tlsConn) {
+		log.Printf("Serving fake content to unauthenticated client %s", conn.RemoteAddr())
+		return transport.Fake(conn, cfg.Fake)
 	}
 
 	tun, err := tunnel.New(cfg, conn.RemoteAddr().String())

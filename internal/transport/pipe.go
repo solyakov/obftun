@@ -15,7 +15,10 @@ import (
 	"github.com/asolyakov/obftun/internal/tunnel"
 )
 
-const bufferSize = 65535
+const (
+	bufferSize = 65535
+	paddedSize = 1400
+)
 
 type InterfaceError struct {
 	Err error
@@ -64,7 +67,7 @@ func connToTun(cfg *config.Config, conn net.Conn, tun *tunnel.Interface) error {
 		if n == 0 || n > bufferSize {
 			return fmt.Errorf("bad packet size from %s: %d", conn.RemoteAddr(), n)
 		}
-		if _, err := io.ReadFull(br, buf[:n]); err != nil {
+		if _, err := io.ReadFull(br, buf[:max(n, paddedSize)]); err != nil {
 			return fmt.Errorf("failed to read packet from %s: %w", conn.RemoteAddr(), err)
 		}
 		if _, err := tun.Write(buf[:n]); err != nil {
@@ -79,6 +82,7 @@ func connToTun(cfg *config.Config, conn net.Conn, tun *tunnel.Interface) error {
 func tunToConn(cfg *config.Config, tun *tunnel.Interface, conn net.Conn) error {
 	bw := bufio.NewWriter(conn)
 	buf := make([]byte, bufferSize)
+	padded := make([]byte, paddedSize)
 	for {
 		n, err := tun.Read(buf)
 		if err != nil {
@@ -87,8 +91,15 @@ func tunToConn(cfg *config.Config, tun *tunnel.Interface, conn net.Conn) error {
 		if err := binary.Write(bw, binary.BigEndian, uint32(n)); err != nil {
 			return fmt.Errorf("failed to write packet size to %s: %w", conn.RemoteAddr(), err)
 		}
-		if _, err := bw.Write(buf[:n]); err != nil {
-			return fmt.Errorf("failed to write packet to %s: %w", conn.RemoteAddr(), err)
+		if n < paddedSize {
+			copy(padded, buf[:n])
+			if _, err := bw.Write(padded); err != nil {
+				return fmt.Errorf("failed to write padded packet to %s: %w", conn.RemoteAddr(), err)
+			}
+		} else {
+			if _, err := bw.Write(buf[:n]); err != nil {
+				return fmt.Errorf("failed to write packet to %s: %w", conn.RemoteAddr(), err)
+			}
 		}
 		if err := bw.Flush(); err != nil {
 			return fmt.Errorf("failed to flush writer to %s: %w", conn.RemoteAddr(), err)

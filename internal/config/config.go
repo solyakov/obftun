@@ -14,9 +14,10 @@ type Config struct {
 	ScriptTimeout int    `short:"t" long:"script-timeout" env:"OBFTUN_SCRIPT_TIMEOUT" description:"Script execution timeout in seconds" default:"15"`
 	ReadTimeout   int    `short:"r" long:"read-timeout" env:"OBFTUN_READ_TIMEOUT" description:"Connection read timeout in seconds" default:"60"`
 	Verbose       bool   `short:"v" long:"verbose" env:"OBFTUN_VERBOSE" description:"Verbose output"`
-	Certificate   string `short:"c" long:"certificate" env:"OBFTUN_CERTIFICATE" description:"Certificate" default:"cert.crt"`
-	Key           string `short:"k" long:"key" env:"OBFTUN_KEY" description:"Private key" default:"key.pem"`
-	CA            string `short:"a" long:"ca" env:"OBFTUN_CA" description:"CA certificate" default:"ca.crt"`
+	Certificate string `short:"c" long:"certificate" env:"OBFTUN_CERTIFICATE" description:"Certificate" default:"cert.crt"`
+	Key         string `short:"k" long:"key" env:"OBFTUN_KEY" description:"Private key" default:"key.pem"`
+	CA          string `short:"a" long:"ca" env:"OBFTUN_CA" description:"CA certificate" default:"ca.crt"`
+	Fake        string `short:"f" long:"fake" env:"OBFTUN_FAKE" description:"Domain to fake. Server proxies requests to this domain for unauthenticated clients. Client uses this domain for SNI." default:"example.com"`
 }
 
 func Parse() (*Config, error) {
@@ -30,4 +31,8 @@ func Parse() (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+func (c *Config) IsServer() bool {
+	return c.Dial == ""
 }
