@@ -152,7 +152,7 @@ func runServer(ctx context.Context, cfg *config.Config, tlsConfig *tls.Config) e
 		go func(c net.Conn) {
 			defer c.Close()
 			log.Printf("Client %s connected", c.RemoteAddr())
-			if err := handleServerConn(ctx, cfg, c, tlsConfig); !errors.Is(err, context.Canceled) {
+			if err := handleServerConn(ctx, cfg, c, tlsConfig); err != nil && !errors.Is(err, context.Canceled) {
 				log.Printf("Client %s connection error: %v", c.RemoteAddr(), err)
 			}
 			log.Printf("Client %s disconnected", c.RemoteAddr())
