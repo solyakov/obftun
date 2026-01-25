@@ -17,7 +17,8 @@ type Config struct {
 	Certificate string `short:"c" long:"certificate" env:"OBFTUN_CERTIFICATE" description:"Certificate" default:"cert.crt"`
 	Key         string `short:"k" long:"key" env:"OBFTUN_KEY" description:"Private key" default:"key.pem"`
 	CA          string `short:"a" long:"ca" env:"OBFTUN_CA" description:"CA certificate" default:"ca.crt"`
-	Fake        string `short:"f" long:"fake" env:"OBFTUN_FAKE" description:"Domain to fake. Server proxies requests to this domain for unauthenticated clients. Client uses this domain for SNI." default:"example.com"`
+	Fake        string `short:"f" long:"fake" env:"OBFTUN_FAKE" description:"Server proxies requests to this domain for unauthenticated clients. Client uses this domain for SNI." default:"example.com"`
+	Padding     bool   `short:"p" long:"padding" env:"OBFTUN_PADDING" description:"Enable packet padding for traffic obfuscation"`
 }
 
 func Parse() (*Config, error) {

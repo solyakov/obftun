@@ -49,7 +49,7 @@ func NewTLSConfig(cfg *config.Config) (*tls.Config, error) {
 	}
 
 	if cfg.IsServer() {
-		tlsConf.NextProtos = []string{"h2", "http/1.1"}
+		tlsConf.NextProtos = []string{"http/1.1"}
 	} else {
 		tlsConf.ServerName = cfg.Fake
 	}

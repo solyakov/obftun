@@ -67,7 +67,11 @@ func connToTun(cfg *config.Config, conn net.Conn, tun *tunnel.Interface) error {
 		if n == 0 || n > bufferSize {
 			return fmt.Errorf("bad packet size from %s: %d", conn.RemoteAddr(), n)
 		}
-		if _, err := io.ReadFull(br, buf[:max(n, paddedSize)]); err != nil {
+		bytesToRead := n
+		if cfg.Padding && n < paddedSize {
+			bytesToRead = paddedSize
+		}
+		if _, err := io.ReadFull(br, buf[:bytesToRead]); err != nil {
 			return fmt.Errorf("failed to read packet from %s: %w", conn.RemoteAddr(), err)
 		}
 		if _, err := tun.Write(buf[:n]); err != nil {
@@ -91,7 +95,7 @@ func tunToConn(cfg *config.Config, tun *tunnel.Interface, conn net.Conn) error {
 		if err := binary.Write(bw, binary.BigEndian, uint32(n)); err != nil {
 			return fmt.Errorf("failed to write packet size to %s: %w", conn.RemoteAddr(), err)
 		}
-		if n < paddedSize {
+		if cfg.Padding && n < paddedSize {
 			copy(padded, buf[:n])
 			if _, err := bw.Write(padded); err != nil {
 				return fmt.Errorf("failed to write padded packet to %s: %w", conn.RemoteAddr(), err)
