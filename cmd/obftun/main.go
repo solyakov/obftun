@@ -152,7 +152,7 @@ func runServer(ctx context.Context, cfg *config.Config, tlsConfig *tls.Config) e
 		go func(c net.Conn) {
 			defer c.Close()
 			log.Printf("Client %s connected", c.RemoteAddr())
-			if err := handleServerConn(ctx, cfg, c); !errors.Is(err, context.Canceled) {
+			if err := handleServerConn(ctx, cfg, c, tlsConfig); !errors.Is(err, context.Canceled) {
 				log.Printf("Client %s connection error: %v", c.RemoteAddr(), err)
 			}
 			log.Printf("Client %s disconnected", c.RemoteAddr())
@@ -160,7 +160,7 @@ func runServer(ctx context.Context, cfg *config.Config, tlsConfig *tls.Config) e
 	}
 }
 
-func handleServerConn(ctx context.Context, cfg *config.Config, conn net.Conn) error {
+func handleServerConn(ctx context.Context, cfg *config.Config, conn net.Conn, tlsConfig *tls.Config) error {
 	tlsConn, ok := conn.(*tls.Conn)
 	if !ok {
 		return fmt.Errorf("expected TLS connection from %s", conn.RemoteAddr())
@@ -170,7 +170,7 @@ func handleServerConn(ctx context.Context, cfg *config.Config, conn net.Conn) er
 		return fmt.Errorf("client %s failed TLS handshake: %w", conn.RemoteAddr(), err)
 	}
 
-	if !transport.IsAuthenticated(tlsConn) {
+	if !transport.IsAuthenticated(tlsConn, tlsConfig) {
 		log.Printf("Serving fake content to unauthenticated client %s", conn.RemoteAddr())
 		return transport.Fake(conn, cfg.Fake)
 	}

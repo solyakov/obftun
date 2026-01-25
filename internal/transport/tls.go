@@ -57,7 +57,22 @@ func NewTLSConfig(cfg *config.Config) (*tls.Config, error) {
 	return tlsConf, nil
 }
 
-func IsAuthenticated(conn *tls.Conn) bool {
+func IsAuthenticated(conn *tls.Conn, tlsConfig *tls.Config) bool {
 	state := conn.ConnectionState()
-	return len(state.VerifiedChains) > 0
+	if len(state.PeerCertificates) == 0 {
+		return false
+	}
+	
+	opts := x509.VerifyOptions{
+		Roots:         tlsConfig.ClientCAs,
+		Intermediates: x509.NewCertPool(),
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	
+	for i := 1; i < len(state.PeerCertificates); i++ {
+		opts.Intermediates.AddCert(state.PeerCertificates[i])
+	}
+	
+	_, err := state.PeerCertificates[0].Verify(opts)
+	return err == nil
 }
