@@ -9,15 +9,15 @@ Type=simple
 
 Environment="BRIDGE=br-obftun"
 Environment="BRIDGE_IP=10.10.0.1"
-Environment="BRIDGE_MASK=24"
+Environment="BRIDGE_MASK=16"
 Environment="BRIDGE_MTU=1500"
 
 # Adjust to your internet-facing interface
 Environment="EXTERNAL_IFACE=ens5"
 
 Environment="DHCP_RANGE_START=10.10.0.10"
-Environment="DHCP_RANGE_END=10.10.0.254"
-Environment="DHCP_LEASE_TIME=12h"
+Environment="DHCP_RANGE_END=10.10.255.254"
+Environment="DHCP_LEASE_TIME=30m"
 
 # Adjust to your DNS servers
 Environment="DNS_SERVER_1=8.8.8.8"
