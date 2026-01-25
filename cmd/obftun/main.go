@@ -46,7 +46,7 @@ func main() {
 	if err := run(ctx, cfg); !errors.Is(err, context.Canceled) {
 		log.Fatalf("Error: %v", err)
 	}
-	log.Printf("Bye!")
+	log.Println("Bye bye!")
 }
 
 func run(ctx context.Context, cfg *config.Config) error {

@@ -152,3 +152,28 @@ All flags can be set via environment variables:
 - `OBFTUN_VERBOSE`
 - `OBFTUN_PADDING`
 
+## Bypassing IP Blacklists with tcp2tcp
+
+If your obftun server gets blacklisted by ISPs, you can deploy `tcp2tcp` on an intermediate non-blacklisted server to forward traffic transparently:
+
+```
+Client (Country 1) --+-- [blocked] --> Internet (Country 2)
+                     |
+                     +-- [blocked] --> Obftun Server (Country 2) --> Internet (Country 2)
+                     |
+                     +-- [not blocked] --> tcp2tcp Server (Country 1) --> Obftun Server (Country 2) --> Internet (Country 2)
+```
+
+This works because ISPs typically only block client-to-server traffic (i.e, Client <--> Obftun Server), not inter-server traffic (i.e, tcp2tcp Server <--> Obftun Server).
+
+Command line flags:
+```
+  -b, --bind            Bind address (default: :443)
+  -t, --target          Target obftun server address (required)
+  -v, --verbose         Verbose logging
+```
+
+All flags can be set via environment variables:
+- `TCP2TCP_BIND`
+- `TCP2TCP_TARGET`
+- `TCP2TCP_VERBOSE`
