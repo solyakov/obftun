@@ -36,14 +36,16 @@ install-server:
 install-tcp2tcp:
 	sudo install -d -m 755 $(INSTALL_DIR)
 	sudo install -m 755 data/tcp2tcp $(INSTALL_DIR)/tcp2tcp
-	sudo install -m 644 systemd/tcp2tcp.service /etc/systemd/system/tcp2tcp.service
+	sudo install -m 644 systemd/tcp2tcp@.service /etc/systemd/system/tcp2tcp@.service
 	sudo systemctl daemon-reload
-	sudo systemctl enable --now tcp2tcp.service
+	sudo systemctl enable --now tcp2tcp@443.service
+	sudo systemctl enable --now tcp2tcp@8443.service
 
 uninstall-tcp2tcp:
-	sudo systemctl disable --now tcp2tcp.service
+	-sudo systemctl disable --now tcp2tcp@443.service
+	-sudo systemctl disable --now tcp2tcp@8443.service
 	sudo rm -f $(INSTALL_DIR)/tcp2tcp
-	sudo rm -f /etc/systemd/system/tcp2tcp.service
+	sudo rm -f /etc/systemd/system/tcp2tcp@.service
 	sudo systemctl daemon-reload
 
 uninstall-server:

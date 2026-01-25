@@ -1,15 +1,14 @@
 [Unit]
-Description=tcp2tcp - Simple TCP forwarder
+Description=tcp2tcp - TCP forwarder on port %i
 After=network.target
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/opt/obftun
-ExecStart=/opt/obftun/tcp2tcp --bind :443 --target YOUR_TARGET_IP:443
+ExecStart=/opt/obftun/tcp2tcp --bind :%i --target YOUR_TARGET_IP:%i
 Restart=always
 RestartSec=5
-
 
 NoNewPrivileges=true
 PrivateTmp=true
