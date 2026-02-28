@@ -1,7 +1,8 @@
 SHELL := /bin/bash
 
-# EC2 IP address (adjust to your setup before running 'make keys')
-SERVER_SAN := IP:<server-ip>
+# Server certificate SANs: IPs and DNS names (adjust before running 'make keys')
+# Include: EC2 IP, tcp2tcp proxy IP, and fake domain for SNI
+SERVER_SAN := IP:<server-ip>,DNS:example.com
 
 INSTALL_DIR := /opt/obftun
 
