@@ -27,6 +27,12 @@ go.work.sum
 # env file
 .env
 
+# Vagrant local state
+.vagrant/
+
+# Local build/data artifacts
+data/
+
 # Editor/IDE
 # .idea/
 # .vscode/

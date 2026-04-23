@@ -11,12 +11,9 @@ RestartSec=5
 User=root
 WorkingDirectory=/opt/obftun
 
-Environment="OBFTUN_BIND=:8443"
-Environment="OBFTUN_CERTIFICATE=/opt/obftun/server.crt"
-Environment="OBFTUN_KEY=/opt/obftun/server.key"
-Environment="OBFTUN_CA=/opt/obftun/ca.crt"
+Environment="OBFTUN_BIND=:80"
+Environment="OBFTUN_SECRET=CHANGE_ME"
 Environment="OBFTUN_SCRIPT=/opt/obftun/ifconfig-server.sh"
-Environment="OBFTUN_FAKE=example.com"
 
 ExecStart=/opt/obftun/obftun
 

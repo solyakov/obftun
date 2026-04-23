@@ -2,11 +2,10 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
+	"crypto/cipher"
 	"errors"
-	"fmt"
 	"log"
-	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -19,8 +18,8 @@ import (
 )
 
 const (
-	dialTimeout   = 10 * time.Second
-	retryInterval = 100 * time.Millisecond
+	retryInterval   = 2 * time.Second
+	shutdownTimeout = 5 * time.Second
 )
 
 func main() {
@@ -50,33 +49,52 @@ func main() {
 }
 
 func run(ctx context.Context, cfg *config.Config) error {
-	tlsConfig, err := transport.NewTLSConfig(cfg)
+	key := transport.DeriveKey(cfg.Secret)
+	gcm, err := transport.NewGCM(key)
 	if err != nil {
 		return err
 	}
 
 	if cfg.IsServer() {
-		return runServer(ctx, cfg, tlsConfig)
+		return runServer(ctx, cfg, gcm)
 	}
 
-	return runClient(ctx, cfg, tlsConfig)
+	return runClient(ctx, cfg, gcm)
 }
 
-func runClient(ctx context.Context, cfg *config.Config, tlsConfig *tls.Config) error {
-	dialer := &net.Dialer{Timeout: dialTimeout}
-	if cfg.Bind != "" {
-		localAddr, err := net.ResolveTCPAddr("tcp", cfg.Bind)
-		if err != nil {
-			return fmt.Errorf("failed to resolve bind address %s: %w", cfg.Bind, err)
-		}
-		dialer.LocalAddr = localAddr
-		log.Printf("Binding to %s", cfg.Bind)
+func runServer(ctx context.Context, cfg *config.Config, gcm cipher.AEAD) error {
+	tunFactory := func(peerAddr string) (transport.TunDevice, error) {
+		return tunnel.New(cfg, peerAddr)
+	}
+	srv := transport.NewServer(cfg, gcm, tunFactory)
+
+	httpServer := &http.Server{
+		Addr:              cfg.Bind,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 30 * time.Second,
 	}
 
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		httpServer.Shutdown(shutdownCtx)
+		srv.Shutdown()
+	}()
+
+	log.Printf("Listening on %s", cfg.Bind)
+	if err := httpServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return ctx.Err()
+}
+
+func runClient(ctx context.Context, cfg *config.Config, gcm cipher.AEAD) error {
 	for {
-		if err := runClientSession(ctx, cfg, dialer, tlsConfig); !errors.Is(err, context.Canceled) {
-			log.Printf("Session error: %v", err)
+		if err := runClientOnce(ctx, cfg, gcm); !errors.Is(err, context.Canceled) {
+			log.Printf("Connection error: %v", err)
 		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -85,103 +103,24 @@ func runClient(ctx context.Context, cfg *config.Config, tlsConfig *tls.Config) e
 	}
 }
 
-func runClientSession(ctx context.Context, cfg *config.Config, dialer *net.Dialer, tlsConfig *tls.Config) error {
+func runClientOnce(ctx context.Context, cfg *config.Config, gcm cipher.AEAD) error {
 	tun, err := tunnel.New(cfg, cfg.Dial)
 	if err != nil {
-		return fmt.Errorf("failed to create tunnel: %w", err)
+		return err
 	}
 	defer tun.Close()
 
 	log.Printf("Created interface %s", tun.Name())
 
-	for {
-		err := handleClientConn(ctx, cfg, dialer, tlsConfig, tun)
-		if errors.Is(err, context.Canceled) || transport.IsInterfaceError(err) {
-			return err
-		}
-
-		log.Printf("Lost connection to %s: %v", cfg.Dial, err)
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(retryInterval):
-		}
-	}
-}
-
-func handleClientConn(ctx context.Context, cfg *config.Config, dialer *net.Dialer, tlsConfig *tls.Config, tun *tunnel.Interface) error {
-	log.Printf("Connecting to %s", cfg.Dial)
-
-	conn, err := tls.DialWithDialer(dialer, "tcp", cfg.Dial, tlsConfig)
+	clientID, err := transport.GenerateClientID()
 	if err != nil {
-		return fmt.Errorf("failed to connect to %s: %w", cfg.Dial, err)
+		return err
 	}
-	defer conn.Close()
 
-	log.Printf("Connected to %s", cfg.Dial)
-
-	return transport.Pipe(ctx, cfg, conn, tun)
-}
-
-func runServer(ctx context.Context, cfg *config.Config, tlsConfig *tls.Config) error {
-	listener, err := tls.Listen("tcp", cfg.Bind, tlsConfig)
+	pipe, err := transport.NewClientPipe(cfg, gcm, clientID)
 	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", cfg.Bind, err)
-	}
-	defer listener.Close()
-
-	log.Printf("Listening on %s", cfg.Bind)
-
-	go func() {
-		<-ctx.Done()
-		listener.Close()
-	}()
-
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			log.Printf("Failed to accept connection: %v", err)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(retryInterval):
-				continue
-			}
-		}
-		go func(c net.Conn) {
-			defer c.Close()
-			log.Printf("Client %s connected", c.RemoteAddr())
-			if err := handleServerConn(ctx, cfg, c, tlsConfig); err != nil && !errors.Is(err, context.Canceled) {
-				log.Printf("Client %s connection error: %v", c.RemoteAddr(), err)
-			}
-			log.Printf("Client %s disconnected", c.RemoteAddr())
-		}(conn)
-	}
-}
-
-func handleServerConn(ctx context.Context, cfg *config.Config, conn net.Conn, tlsConfig *tls.Config) error {
-	tlsConn, ok := conn.(*tls.Conn)
-	if !ok {
-		return fmt.Errorf("expected TLS connection from %s", conn.RemoteAddr())
+		return err
 	}
 
-	if err := tlsConn.HandshakeContext(ctx); err != nil {
-		return fmt.Errorf("client %s failed TLS handshake: %w", conn.RemoteAddr(), err)
-	}
-
-	if !transport.IsAuthenticated(tlsConn, tlsConfig) {
-		log.Printf("Serving fake content to unauthenticated client %s", conn.RemoteAddr())
-		return transport.Fake(conn, cfg.Fake)
-	}
-
-	tun, err := tunnel.New(cfg, conn.RemoteAddr().String())
-	if err != nil {
-		return fmt.Errorf("failed to create tunnel for %s: %w", conn.RemoteAddr(), err)
-	}
-	defer tun.Close()
-
-	log.Printf("Created interface %s for %s", tun.Name(), conn.RemoteAddr())
-
-	return transport.Pipe(ctx, cfg, conn, tun)
+	return pipe.Run(ctx, tun)
 }

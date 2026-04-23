@@ -2,48 +2,61 @@ package transport
 
 import (
 	"bufio"
+	"bytes"
 	"context"
-	"encoding/binary"
-	"errors"
+	"crypto/cipher"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
-	"net"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/asolyakov/obftun/internal/config"
-	"github.com/asolyakov/obftun/internal/tunnel"
 )
 
-const (
-	bufferSize = 65535
-	paddedSize = 1400
-)
+const sseScanBufSize = 256 * 1024
 
-type InterfaceError struct {
-	Err error
+type ClientPipe struct {
+	cfg        *config.Config
+	gcm        cipher.AEAD
+	clientID   []byte
+	serverURL  string
+	httpClient *http.Client
 }
 
-func (e *InterfaceError) Error() string {
-	return fmt.Sprintf("interface error: %v", e.Err)
+func NewClientPipe(cfg *config.Config, gcm cipher.AEAD, clientID []byte) (*ClientPipe, error) {
+	if len(clientID) != clientIDLen {
+		return nil, fmt.Errorf("invalid client ID length: got %d, want %d", len(clientID), clientIDLen)
+	}
+	id := make([]byte, clientIDLen)
+	copy(id, clientID)
+	return &ClientPipe{
+		cfg:       cfg,
+		gcm:       gcm,
+		clientID:  id,
+		serverURL: "http://" + cfg.Dial,
+		httpClient: &http.Client{
+			Transport: &http.Transport{
+				MaxIdleConns:        2,
+				MaxIdleConnsPerHost: 2,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
+	}, nil
 }
 
-func (e *InterfaceError) Unwrap() error {
-	return e.Err
-}
+func (p *ClientPipe) Run(ctx context.Context, tun TunDevice) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-func IsInterfaceError(err error) bool {
-	var ie *InterfaceError
-	return errors.As(err, &ie)
-}
-
-func Pipe(ctx context.Context, cfg *config.Config, conn net.Conn, tun *tunnel.Interface) error {
 	errc := make(chan error, 2)
 
-	log.Printf("Piping %s <-> %s", tun.Name(), conn.RemoteAddr())
+	log.Printf("Piping %s <-> %s", tun.Name(), p.cfg.Dial)
 
-	go func() { errc <- connToTun(cfg, conn, tun) }()
-	go func() { errc <- tunToConn(cfg, tun, conn) }()
+	go func() { errc <- p.readSSE(ctx, tun) }()
+	go func() { errc <- p.sendPosts(ctx, tun) }()
 
 	select {
 	case <-ctx.Done():
@@ -53,63 +66,174 @@ func Pipe(ctx context.Context, cfg *config.Config, conn net.Conn, tun *tunnel.In
 	}
 }
 
-func connToTun(cfg *config.Config, conn net.Conn, tun *tunnel.Interface) error {
-	br := bufio.NewReader(conn)
-	buf := make([]byte, bufferSize)
-	readTimeout := time.Duration(cfg.ReadTimeout) * time.Second
-	for {
-		conn.SetReadDeadline(time.Now().Add(readTimeout))
+func (p *ClientPipe) readSSE(ctx context.Context, tun TunDevice) error {
+	token, err := EncryptToken(p.gcm, p.clientID)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt token: %w", err)
+	}
 
-		var n uint32
-		if err := binary.Read(br, binary.BigEndian, &n); err != nil {
-			return fmt.Errorf("failed to read packet size from %s: %w", conn.RemoteAddr(), err)
+	feedURL := p.serverURL + "/api/feed?t=" + token
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create SSE request: %w", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("SSE connection failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("SSE unexpected status: %d", resp.StatusCode)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, sseScanBufSize), sseScanBufSize)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, sseDataPrefixStr) {
+			continue
 		}
-		if n == 0 || n > bufferSize {
-			return fmt.Errorf("bad packet size from %s: %d", conn.RemoteAddr(), n)
+
+		jsonData := line[len(sseDataPrefixStr):]
+		var msgs []message
+		if err := json.Unmarshal([]byte(jsonData), &msgs); err != nil {
+			if p.cfg.Verbose {
+				log.Printf("SSE: failed to parse JSON: %v", err)
+			}
+			continue
 		}
-		bytesToRead := n
-		if cfg.Padding && n < paddedSize {
-			bytesToRead = paddedSize
+
+		for _, msg := range msgs {
+			_, data, err := Decrypt(p.gcm, msg.Body)
+			if err != nil {
+				if p.cfg.Verbose {
+					log.Printf("SSE: failed to decrypt packet: %v", err)
+				}
+				continue
+			}
+
+			if len(data) == 0 {
+				continue
+			}
+
+			if _, err := tun.Write(data); err != nil {
+				return fmt.Errorf("failed to write to %s: %w", tun.Name(), err)
+			}
+			if p.cfg.Verbose {
+				log.Printf("%s [%d]-> %s", p.cfg.Dial, len(data), tun.Name())
+			}
 		}
-		if _, err := io.ReadFull(br, buf[:bytesToRead]); err != nil {
-			return fmt.Errorf("failed to read packet from %s: %w", conn.RemoteAddr(), err)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("SSE read error: %w", err)
+	}
+	return fmt.Errorf("SSE stream closed")
+}
+
+func (p *ClientPipe) sendPosts(ctx context.Context, tun TunDevice) error {
+	buf := make([]byte, tunBufSize)
+	pktCh := make(chan []byte, chanBufSize)
+
+	go func() {
+		for {
+			n, err := tun.Read(buf)
+			if err != nil {
+				close(pktCh)
+				return
+			}
+			pkt := make([]byte, n)
+			copy(pkt, buf[:n])
+			select {
+			case pktCh <- pkt:
+			case <-ctx.Done():
+				return
+			}
 		}
-		if _, err := tun.Write(buf[:n]); err != nil {
-			return &InterfaceError{Err: fmt.Errorf("failed to write packet to %s: %w", tun.Name(), err)}
-		}
-		if cfg.Verbose {
-			log.Printf("%s [%d]-> %s", conn.RemoteAddr(), n, tun.Name())
+	}()
+
+	timer := time.NewTimer(batchInterval)
+	defer timer.Stop()
+
+	var batch [][]byte
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+
+		case pkt, ok := <-pktCh:
+			if !ok {
+				return fmt.Errorf("tunnel interface closed")
+			}
+			batch = append(batch, pkt)
+			if len(batch) >= batchMaxSize {
+				if err := p.flushBatch(ctx, batch); err != nil {
+					return err
+				}
+				batch = nil
+				timer.Reset(batchInterval)
+			}
+
+		case <-timer.C:
+			if len(batch) > 0 {
+				if err := p.flushBatch(ctx, batch); err != nil {
+					return err
+				}
+				batch = nil
+			}
+			timer.Reset(batchInterval)
 		}
 	}
 }
 
-func tunToConn(cfg *config.Config, tun *tunnel.Interface, conn net.Conn) error {
-	bw := bufio.NewWriter(conn)
-	buf := make([]byte, bufferSize)
-	padded := make([]byte, paddedSize)
-	for {
-		n, err := tun.Read(buf)
+func (p *ClientPipe) flushBatch(ctx context.Context, packets [][]byte) error {
+	messages := make([]message, 0, len(packets))
+	for _, pkt := range packets {
+		encoded, err := Encrypt(p.gcm, p.clientID, pkt)
 		if err != nil {
-			return &InterfaceError{Err: fmt.Errorf("failed to read packet from %s: %w", tun.Name(), err)}
+			return fmt.Errorf("failed to encrypt packet: %w", err)
 		}
-		if err := binary.Write(bw, binary.BigEndian, uint32(n)); err != nil {
-			return fmt.Errorf("failed to write packet size to %s: %w", conn.RemoteAddr(), err)
-		}
-		if cfg.Padding && n < paddedSize {
-			copy(padded, buf[:n])
-			if _, err := bw.Write(padded); err != nil {
-				return fmt.Errorf("failed to write padded packet to %s: %w", conn.RemoteAddr(), err)
-			}
-		} else {
-			if _, err := bw.Write(buf[:n]); err != nil {
-				return fmt.Errorf("failed to write packet to %s: %w", conn.RemoteAddr(), err)
-			}
-		}
-		if err := bw.Flush(); err != nil {
-			return fmt.Errorf("failed to flush writer to %s: %w", conn.RemoteAddr(), err)
-		}
-		if cfg.Verbose {
-			log.Printf("%s [%d]-> %s", tun.Name(), n, conn.RemoteAddr())
+		messages = append(messages, message{
+			ID:   randomHex(8),
+			TS:   time.Now().Unix(),
+			Body: encoded,
+			Pad:  randomPad(),
+		})
+	}
+
+	body, err := json.Marshal(messages)
+	if err != nil {
+		return fmt.Errorf("failed to marshal messages: %w", err)
+	}
+
+	sendURL := p.serverURL + "/api/send"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sendURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create POST request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("POST failed: %w", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("POST to %s returned status %d, ignoring", p.cfg.Dial, resp.StatusCode)
+		return nil
+	}
+
+	if p.cfg.Verbose {
+		for _, pkt := range packets {
+			log.Printf("%s [%d]-> %s", p.cfg.Iface, len(pkt), p.cfg.Dial)
 		}
 	}
+
+	return nil
 }

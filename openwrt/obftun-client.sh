@@ -2,7 +2,6 @@
 #
 # obftun client wrapper for OpenWrt
 # This script is called by /etc/init.d/obftund
-#
 
 set -e
 
@@ -24,13 +23,10 @@ function setup_bridge() {
     echo "Bridge $bridge configured"
 }
 
-declare -r dial="<server-ip>:8443"
+declare -r dial="<server-ip>:80"
 declare -r obftun_bin="./obftun"
 declare -r script="./ifconfig-client.sh"
-declare -r certificate="./client.crt"
-declare -r key="./client.key"
-declare -r ca="./ca.crt"
-declare -r fake="example.com"
+declare -r secret="CHANGE_ME"
 
 function run_client_forever() {
     while true; do
@@ -38,10 +34,7 @@ function run_client_forever() {
         "$obftun_bin" \
             --dial "$dial" \
             --script "$script" \
-            --certificate "$certificate" \
-            --key "$key" \
-            --ca "$ca" \
-            --fake "$fake"
+            --secret "$secret"
     done
 }
 

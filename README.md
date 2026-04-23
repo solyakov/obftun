@@ -1,10 +1,10 @@
 # obftun
 
-A secure tunnel over TLS with mutual authentication, supporting multiple concurrent clients.
+Encrypted Layer 2 tunnel hidden inside plain HTTP traffic, designed to bypass DPI and censorship.
 
 ## Overview
 
-`obftun` creates encrypted Layer 2 tunnels between clients and server using TLS. Each client connection gets its own dedicated TAP interface on the server. Both client and server authenticate each other using certificates (mTLS).
+`obftun` creates encrypted TAP tunnels between clients and server. Traffic is disguised as normal HTTP communication (JSON API with SSE) on port 80. A shared secret provides encryption (AES-256-GCM).
 
 ### Architecture
 
@@ -25,11 +25,12 @@ A secure tunnel over TLS with mutual authentication, supporting multiple concurr
 │                                    │            │
 │                            ┌───────┴───────┐    │
 │                            │ obftun-server │    │
+│                            │   (port 80)   │    │
 │                            └───────┬───────┘    │
 │                                    │            │
 └────────────────────────────────────┼────────────┘
                                      │
-                      (mTLS)         │
+                       (HTTP)        │
            ┌─────────────────────────┘
            │
 ┌──────────┼──────────────────────────────────────┐
@@ -53,31 +54,14 @@ A secure tunnel over TLS with mutual authentication, supporting multiple concurr
 
 ## Quick Start
 
-### 1. Generate Certificates
-
-Edit `makefile` and set `SERVER_SAN` to your server's IP address:
-```makefile
-SERVER_SAN := IP:1.2.3.4
-```
-
-Then generate certificates:
-```bash
-make keys
-```
-
-This creates:
-- Certificate Authority: `data/ca.crt` + `data/ca.key`
-- Server certificate: `data/server.crt` + `data/server.key`
-- Client certificate: `data/client.crt` + `data/client.key`
-
-### 2. Build
+### 1. Build
 
 ```bash
 make build              # Local build (for development)
 make arm64-build        # For OpenWrt/ARM64 routers
 ```
 
-### 3. Server Installation
+### 2. Server Installation
 
 Install on your server (EC2, VPS, etc.):
 
@@ -85,20 +69,14 @@ Install on your server (EC2, VPS, etc.):
 make build install-server
 ```
 
-This installs:
-- Binary: `/opt/obftun/obftun`
-- Interface management script: `/opt/obftun/ifconfig-server.sh`
-- Server certificates: `/opt/obftun/server.{crt,key}`
-- CA certificate: `/opt/obftun/ca.crt`
-- Bridge service: `/etc/systemd/system/obftun-bridge.service`
-- Server service: `/etc/systemd/system/obftun-server.service`
+Edit `/etc/systemd/system/obftun-server.service` and set `OBFTUN_SECRET` to your shared secret.
 
 Edit `/etc/systemd/system/obftun-bridge.service` to configure the bridge:
 - `BRIDGE_IP` - Bridge IP address (default: 10.10.0.1)
 - `EXTERNAL_IFACE` - Your internet-facing interface (e.g., ens5, eth0)
 - `DNS_SERVER_1`, `DNS_SERVER_2` - DNS servers advertised to clients (default: 8.8.8.8, 8.8.4.4)
 
-### 4. Client Installation (OpenWrt)
+### 3. Client Installation (OpenWrt)
 
 On your OpenWrt router:
 
@@ -106,13 +84,13 @@ On your OpenWrt router:
 # Copy files to router (from build machine)
 scp data/obftun root@router:/opt/obftun/
 scp scripts/ifconfig-client.sh root@router:/opt/obftun/
-scp data/client.{crt,key} data/ca.crt root@router:/opt/obftun/
 scp openwrt/obftun-client.sh root@router:/opt/obftun/
 scp openwrt/obftund root@router:/etc/init.d/
 
 # Edit client configuration
 vi /opt/obftun/obftun-client.sh
-# Set: dial="your-server-ip:8443"
+# Set: dial="your-server-ip:80"
+# Set: secret="your-shared-secret"
 # Set: wifi_iface="phy1-ap0"  # Your WiFi interface
 
 # Enable and start service
@@ -122,35 +100,46 @@ vi /opt/obftun/obftun-client.sh
 
 ## Configuration
 
-Command line flags:
+### Server flags
+
 ```
-  -b, --bind            Server bind address (default: :8443 for server)
-  -d, --dial            Server address to connect to (client only)
+  -b, --bind            Bind address (default: :80)
+  -x, --secret          Shared secret for encryption (required)
+  -m, --max-clients     Maximum concurrent clients (default: 10)
   -i, --iface           Interface name pattern (default: tap%d)
   -s, --script          Setup script for interface configuration
   -t, --script-timeout  Script execution timeout in seconds (default: 15)
-  -r, --read-timeout    Connection read timeout in seconds (default: 60)
-  -c, --certificate     Certificate file (default: cert.crt)
-  -k, --key             Private key file (default: key.pem)
-  -a, --ca              CA certificate file (default: ca.crt)
-  -f, --fake            Server proxies requests to this domain for unauthenticated clients. Client uses this domain for SNI. (default: example.com)
   -v, --verbose         Verbose logging
-  -p, --padding         Enable packet padding for traffic obfuscation
 ```
 
-All flags can be set via environment variables:
-- `OBFTUN_BIND`
-- `OBFTUN_DIAL`
-- `OBFTUN_IFACE`
-- `OBFTUN_SCRIPT`
-- `OBFTUN_SCRIPT_TIMEOUT`
-- `OBFTUN_READ_TIMEOUT`
-- `OBFTUN_CERTIFICATE`
-- `OBFTUN_KEY`
-- `OBFTUN_CA`
-- `OBFTUN_FAKE`
-- `OBFTUN_VERBOSE`
-- `OBFTUN_PADDING`
+### Client flags
+
+```
+  -d, --dial            Server address to connect to (required)
+  -x, --secret          Shared secret for encryption (required)
+  -i, --iface           Interface name pattern (default: tap%d)
+  -s, --script          Setup script for interface configuration
+  -t, --script-timeout  Script execution timeout in seconds (default: 15)
+  -v, --verbose         Verbose logging
+```
+
+All flags can be set via environment variables (`OBFTUN_BIND`, `OBFTUN_DIAL`, `OBFTUN_SECRET`, etc.).
+
+## Testing
+
+### Unit tests
+
+```bash
+go test ./... -race
+```
+
+### End-to-end tests
+
+Requires two Vagrant VMs (VMware Fusion):
+
+```bash
+bash tests/e2e/test.sh
+```
 
 ## Bypassing IP Blacklists with tcp2tcp
 
@@ -172,8 +161,3 @@ Command line flags:
   -t, --target          Target obftun server address (required)
   -v, --verbose         Verbose logging
 ```
-
-All flags can be set via environment variables:
-- `TCP2TCP_BIND`
-- `TCP2TCP_TARGET`
-- `TCP2TCP_VERBOSE`
